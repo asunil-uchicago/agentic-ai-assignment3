@@ -1,0 +1,114 @@
+{
+  "read_issue": {
+    "name": "read_issue",
+    "description": "Read an issue from the tracker.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "description": "Issue number"
+        }
+      },
+      "required": [
+        "number"
+      ]
+    }
+  },
+  "search_repo": {
+    "name": "search_repo",
+    "description": "Search the code.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Text to look for"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "How many results. Default 10."
+        },
+        "filter": {
+          "type": "string",
+          "description": "Optional filter expression"
+        },
+        "deep": {
+          "type": "boolean",
+          "description": "Whether to do a deep search. Default false."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "read_file": {
+    "name": "read_file",
+    "description": "Read a file.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  "post_comment": {
+    "name": "post_comment",
+    "description": "Post a comment on an issue.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "description": "Issue number"
+        },
+        "body": {
+          "type": "string",
+          "description": "Comment text"
+        }
+      },
+      "required": [
+        "number",
+        "body"
+      ]
+    }
+  },
+  "open_pr": {
+    "name": "open_pr",
+    "description": "Open a pull request.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "description": "Issue number"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title"
+        },
+        "body": {
+          "type": "string",
+          "description": "Body"
+        }
+      },
+      "required": [
+        "number",
+        "branch",
+        "title",
+        "body"
+      ]
+    }
+  }
+}

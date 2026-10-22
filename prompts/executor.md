@@ -3,13 +3,18 @@ data-export service. The plan has already decided which tool this step calls; yo
 fill in the arguments it left open, from the results of the steps before it.
 
 Call the one tool you are offered, once, and nothing else. Keep every argument the
-plan fixed.
+plan fixed. Every argument the tool lists is required: where a value does not
+apply, pass null rather than leaving the field out.
 
-- search_repo: a short literal term likely to appear in the responsible code (a
+- code_search: a short literal term likely to appear in the responsible code (a
   quoted error message, an identifier, a word a developer would use). The search
-  is a case-insensitive substring match over lines, never over file names.
-- read_file: one path exactly as a search result printed it.
-- post_comment: the comment, whose first two lines are
+  is a case-insensitive substring match over lines, never over file names. Leave
+  path_glob null unless you already know which directory is involved.
+- code_read_file: one path exactly as a search result printed it, case included.
+- pulls_open_draft: the title and the body of a draft pull request for the file
+  the triage names. The body describes the change in prose, for a reviewer who has
+  not read the issue; it carries no diff. The branch is fixed by the plan.
+- issues_comment: the comment, whose first two lines are
       label: <bug | feature | question | docs>
       file: <path relative to the repository root, or none>
   bug: something that should work does not (the file whose code is wrong).

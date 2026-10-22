@@ -1,10 +1,24 @@
 """Assignment 2's working solution, Parts B, C and D: plan, validate, execute inside the
-boundary, revise at one checkpoint, and a second pass before posting.
-It ships in Assignment 3's starter in place of your own Assignment 2 code, changed in
-two ways only: it finds each tool by its role in tools/roles.yaml (harness.roles), so
-a tool you rename still runs, and it reads a search result as text or as JSON
-(harness.formats.result_paths). The plan rule is still Assignment 2's, the comment
-last; a PR step runs like any other step, unskipped, until Part C.
+boundary, revise at one checkpoint, and a second pass before posting. It finds each
+tool by its role in tools/roles.yaml (harness.roles), so a tool renamed in Part A
+still runs, and it reads a search result as text or as JSON
+(harness.formats.result_paths).
+
+Assignment 3, Part C, adds the pull request and fixes the order of the two writes.
+The plan rule is now: exactly one comment step, last, with exactly one pull-request
+step right before it (schema_check). A pull request can be closed again and a
+comment cannot, so a run that fails at the pull request has shown a reader nothing.
+
+The pull request needs the triage's file, and the file is settled only once the
+draft has passed the second pass, so the executor drafts the comment and runs the
+second pass on it before the pull-request step, holds the draft, and posts that same
+draft, unchanged, at the comment step (draft_comment). The draft is the executor's
+work, not a step of the plan: a draft the second pass holds ends the run before
+either write. A run whose draft names no file skips the pull-request step by a check
+here in the executor (pull_request), not by a condition the plan carries.
+
+A write whose outcome the registry could not read back comes back with `escalate`
+set, and the step that made it ends the run `escalated` (run_step, comment).
 
 The boundary: the executor runs the plan's steps in order and nothing else. Where a
 step's arguments are "$fill", one model call fills them, offered that step's tool
@@ -69,6 +83,29 @@ def allows_null(spec: dict) -> bool:
         isinstance(b, dict) and allows_null(b) for b in spec.get("anyOf") or spec.get("oneOf") or [])
 
 
+def absent(spec: dict):
+    """The value that means "this field is not set", for a schema fitted to strict mode.
+
+    Part A, task 4, makes every field required, so "absent" has to be a value: null
+    where the schema allows one, the first value of a closed enum, which the definition
+    documents as the normal case, and an object whose fields are each their own absent
+    value. Strict mode guarantees structure, not content (slide 22): a model does leave
+    a required field out, and when it does the harness supplies this rather than sending
+    a call the boundary will refuse."""
+    if allows_null(spec):
+        return None
+    values = spec.get("enum")
+    if isinstance(values, list) and values:
+        return values[0]
+    kinds = spec.get("type")
+    kinds = kinds if isinstance(kinds, list) else [kinds]
+    if "object" in kinds or "properties" in spec:
+        return {name: absent(prop) for name, prop in (spec.get("properties") or {}).items()}
+    if "array" in kinds:
+        return []
+    return None
+
+
 def run(ctx) -> None:
     plan = plan_until_valid(ctx)
     if plan is None:
@@ -78,13 +115,20 @@ def run(ctx) -> None:
 
 
 def schema_check(ctx, plan: dict, version: int) -> list[dict]:
-    """The plan as the planner's tool returned it, against agent/plan_schema.json. A
-    failure is written as a schema line, and comes back as failures for a re-plan."""
+    """The plan as the planner's tool returned it, against agent/plan_schema.json, and
+    against the order Assignment 3 fixes: exactly one comment step, last, with exactly
+    one pull-request step right before it. A failure is written as a schema line, and
+    comes back as failures for a re-plan."""
     problems = schema_errors({k: v for k, v in plan.items() if k != "meta"}, SCHEMA)
     steps = plan.get("steps") or []
-    if not steps or not isinstance(steps[-1], dict) or role(steps[-1].get("tool")) != "comment":
-        problems.append(f"the plan's last step is not the comment tool, {tool_for('comment')}: the comment "
-                        "comes last")
+    kinds = [role(s.get("tool")) for s in steps if isinstance(s, dict)]
+    if kinds.count("comment") != 1 or not kinds or kinds[-1] != "comment":
+        problems.append(f"the plan must have exactly one {tool_for('comment')} step and it must be the last: "
+                        "a comment, once read, cannot be taken back")
+    if kinds.count("open_pr") != 1 or len(kinds) < 2 or kinds[-2] != "open_pr":
+        problems.append(f"the plan must have exactly one {tool_for('open_pr')} step and it must be the step "
+                        f"right before the {tool_for('comment')} step: a pull request can be closed again, "
+                        "so it is opened first")
     if problems:
         ctx.trace.event("schema", version=version, errors=problems[:20])
     return [{"step": None, "check": "schema", "error": e} for e in problems[:5]]
@@ -122,6 +166,7 @@ class Executor:
         self.revisions = 0
         self.revised: set[str] = set()   # ids of steps a revision added or changed: the checkpoint follows them
         self.ran: set[str] = set()       # ids of steps that ran and are not to run again
+        self.draft: dict | None = None   # the comment, drafted and checked before either write (Part C, task 1)
 
     # -- the plan, in order ------------------------------------------------------------
     def next_step(self) -> dict | None:
@@ -132,8 +177,13 @@ class Executor:
             step = self.next_step()
             if step is None:
                 return                            # the plan is finished; the runner writes completed
-            if role(step.get("tool")) == "comment":
+            kind = role(step.get("tool"))
+            if kind == "comment":
                 if not self.comment(step):
+                    return
+                continue
+            if kind == "open_pr":
+                if not self.pull_request(step):
                     return
                 continue
             first = not any(role(r["tool"]) == "search" for r in self.results)
@@ -144,21 +194,50 @@ class Executor:
                 self.checkpoint(CHECKPOINT, any(SOURCE.match(p) for p in result.get("paths") or []))
 
     # -- one step ------------------------------------------------------------------------
-    def run_step(self, step: dict) -> dict | None:
+    def run_step(self, step: dict, note: str = "") -> dict | None:
         tool, args = step.get("tool"), step_args(step)
         if not tool:
             return self.record(step, args, None, "no_tool")
-        args = self.filled(step, args)
+        args = self.filled(step, args, note=note)
         if args is None:
             return None
         result = self.ctx.call_tool(self.calls, tool, args, plan_step=step.get("id"))
-        return self.record(step, args, result)
+        entry = self.record(step, args, result)
+        if getattr(result, "escalate", False):    # the third exit: the registry could not confirm a write
+            self.ctx.trace.end("escalated", detail=f"step {step.get('id')}: {result.content[:300]}")
+            return None
+        return entry
 
-    def filled(self, step: dict, args: dict) -> dict | None:
-        to_fill = [k for k, v in args.items() if v == FILL]
+    def schema_for(self, tool: str) -> dict | None:
+        return next((t for t in self.ctx.tools.schemas if t["name"] == tool), None)
+
+    def complete(self, step: dict, args: dict) -> dict:
+        """Every required argument the plan did not write, set to its absent value.
+
+        Part A, task 4, leaves no argument optional, so a plan written before the issue
+        was read still has to say something about each one. The plan is fixed and cannot
+        be asked, and the schema already states what "not set" is, so the harness fills
+        it in here rather than spending a call on a request the boundary would refuse."""
+        schema = self.schema_for(step.get("tool") or "")
+        if schema is None:
+            return args
+        props = (schema.get("input_schema") or {}).get("properties") or {}
+        out = dict(args)
+        for name in (schema.get("input_schema") or {}).get("required") or []:
+            if name not in out and name in props:
+                out[name] = absent(props[name])
+        return out
+
+    def filled(self, step: dict, args: dict, note: str = "") -> dict | None:
+        """An argument the plan left open. A planner writes "$fill" for one, but some
+        write a template around it ("label: <bug | ...>\\nfile: <path>\\n\\n$fill"), and a
+        template posted as it stands is a comment that parses as nothing. So any string
+        value that holds the marker anywhere is a value the plan left open."""
+        args = self.complete(step, args)
+        to_fill = [k for k, v in args.items() if v == FILL or (isinstance(v, str) and FILL in v)]
         if not to_fill:
             return args
-        filled = self.fill(step, args, to_fill)
+        filled = self.fill(step, args, to_fill, note=note)
         if filled is None:
             self.record(step, args, None, "off_plan")
             self.ctx.trace.end("escalated", detail=f"step {step.get('id')}: no on-plan call in {MAX_FILL_TRIES} tries")
@@ -170,10 +249,10 @@ class Executor:
         keeps every argument the model gave that the schema knows, the ones the plan never
         mentioned included, and a null where the schema allows one (Part A's required and
         nullable fields); the plan's own values win."""
-        schema = next((t for t in self.ctx.tools.schemas if t["name"] == step["tool"]), None)
+        schema = self.schema_for(step["tool"])
         if schema is None:
             return None
-        fixed = {k: v for k, v in args.items() if v != FILL}
+        fixed = {k: v for k, v in args.items() if k not in keys}
         props = (schema.get("input_schema") or {}).get("properties") or {}
         nullable = {k for k, s in props.items() if isinstance(s, dict) and allows_null(s)}
         for _ in range(MAX_FILL_TRIES):
@@ -186,6 +265,9 @@ class Executor:
                     self.refuse(step, call)       # the boundary: never run, always traced
                     continue
                 filled = {**{k: v for k, v in call.input.items() if k in props}, **fixed}   # the plan's values win
+                for name in (schema.get("input_schema") or {}).get("required") or []:
+                    if name not in filled and name in props:
+                        filled[name] = absent(props[name])          # a field neither the plan nor the model set
                 if any(k not in filled or filled[k] in ("", FILL) or (filled[k] is None and k not in nullable)
                        for k in keys):
                     continue
@@ -226,7 +308,8 @@ class Executor:
             error = "not_found" if "no such file" in text else "tool_error"
         if error is None and role(tool) == "search" and not count:
             error = "no_matches"
-        entry = {"id": step.get("id"), "tool": tool, "status": "failed" if error else "done", "count": count,
+        status = "skipped" if error == "skipped_no_file" else ("failed" if error else "done")
+        entry = {"id": step.get("id"), "tool": tool, "status": status, "count": count,
                  "paths": paths, "error_code": error, "args": args}
         self.results.append(entry)
         self.ran.add(str(step.get("id")))
@@ -261,18 +344,66 @@ class Executor:
         self.ctx.trace.plan(self.version, proposed)
         return True
 
-    # -- the comment, and the second pass before it ----------------------------------------------
-    def comment(self, step: dict) -> bool:
-        """Draft, run the second pass, then post once. False when the run has ended."""
-        draft = self.filled(step, step_args(step))
-        if draft is None:
+    # -- the draft, the pull request, and the comment, in that order ------------------------------
+    def comment_step(self) -> dict | None:
+        """The plan's comment step: the last one, by the plan rule."""
+        return next((s for s in reversed(self.plan.get("steps") or []) if role(s.get("tool")) == "comment"), None)
+
+    def draft_comment(self) -> bool:
+        """Draft the comment and run the second pass on it, before either write.
+
+        The pull request needs the triage's file, and the file is settled only once the
+        draft has passed the second pass, so the draft happens here, before the first
+        write: a draft the second pass holds ends the run with nothing written at all.
+        The draft is the executor's work, not a step of the plan, so the comment step is
+        not marked as run; it is posted, unchanged, when its own step comes."""
+        step = self.comment_step()
+        if step is None:
+            self.ctx.trace.end("escalated", detail="the plan has no comment step to draft")
             return False
+        args = dict(step_args(step))
+        args.setdefault(arg("comment", "body"), FILL)   # the one argument a fixed plan cannot know
+        draft = self.filled(step, args)
+        if draft is None:
+            return False                          # filled() ended the run escalated
         final = self.second_pass(step, draft) if self.critique else draft
         if final is None:
             self.record(step, draft, None, "held")
             self.ctx.trace.end("escalated", detail=f"the draft still failed the second pass after {MAX_ROUNDS} rounds")
             return False
-        self.record(step, final, self.ctx.call_tool(self.calls, step["tool"], final, plan_step=step.get("id")))
+        self.draft = final
+        self.ctx.trace.event("draft", step=step.get("id"), body=final[arg("comment", "body")])
+        return True
+
+    def pull_request(self, step: dict) -> bool:
+        """Open the draft pull request, or skip it when the triage names no file.
+
+        The skip is a check here, in the executor, not a condition the plan carries and
+        not a revision: the plan is fixed before the issue is read, so whether the file
+        is none is not knowable when the plan is written, and a check in code costs no
+        model call and cannot be talked out of."""
+        if self.draft is None and not self.draft_comment():
+            return False
+        _, file = parse_triage_comment(str(self.draft[arg("comment", "body")]))
+        if file in (None, "none"):
+            self.record(step, step_args(step), None, "skipped_no_file")
+            self.ctx.trace.event("pr_skipped", step=step.get("id"),
+                                 reason="the draft comment names no file, so there is no change to propose")
+            return True
+        note = (f"The triage this pull request belongs to names the file {file}. Propose the change in that "
+                f"file, in prose and with no diff, and open the pull request from branch "
+                f"repomind/issue-{self.ctx.issue_number}.")
+        return self.run_step(step, note=note) is not None
+
+    def comment(self, step: dict) -> bool:
+        """Post the draft once. False when the run has ended."""
+        if self.draft is None and not self.draft_comment():
+            return False
+        result = self.ctx.call_tool(self.calls, step["tool"], self.draft, plan_step=step.get("id"))
+        self.record(step, self.draft, result)
+        if getattr(result, "escalate", False):     # the third exit
+            self.ctx.trace.end("escalated", detail=result.content[:300])
+            return False
         return True
 
     def evidence(self) -> dict:

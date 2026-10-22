@@ -1,11 +1,73 @@
 {
-  "name": "read_file",
-  "description": "Read a file.",
+  "name": "code_read_file",
+  "description": "Read one file of Ledgerline's private codebase by its exact path, to confirm that the file a search pointed at really contains the cause. Paths are relative to the repository root and are matched exactly, character for character, case included: src/Report.ts and src/report.tsx are two different files, and asking for a spelling that does not exist is an error that lists the near matches rather than quietly opening one of them. Pass a path exactly as a code_search result printed it. Returns a JSON object: path (echoed back), found, lines (how many lines the whole file has), first_line, last_line, chars_returned, truncated and text. A file that exists but holds nothing comes back as a success with lines 0 and text an empty string, which means the file is empty, not that the read failed; a path that does not exist is an error instead. Every response is capped: concise returns at most 4000 characters of text and detailed at most 20000, and when the file is longer than the cap the text is cut there and truncated is true, so a partial read always says it is partial. Files under config/ are not readable and never come back.",
+  "strict": true,
   "input_schema": {
     "type": "object",
+    "additionalProperties": false,
+    "required": ["path", "response_format", "line_range"],
     "properties": {
-      "path": {"type": "string", "description": "File path"}
+      "path": {
+        "type": "string",
+        "description": "The file's path relative to the repository root, with forward slashes and no leading ./, such as src/util/money.ts. Matched exactly, case included: the repository is read as a list of paths, not through the file system, so a wrong case fails here even where a disk would silently open the other file. Copy it from a code_search result rather than reconstructing it."
+      },
+      "response_format": {
+        "type": ["string", "null"],
+        "enum": ["concise", "detailed", null],
+        "description": "How much of the file to return. Null means concise, the cheap default: at most 4000 characters, which is the whole of most files in this codebase and enough of the rest to judge a triage. detailed returns at most 20000 characters and is worth its extra tokens only when a concise read came back truncated and the part you need is past the cut."
+      },
+      "line_range": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "start", "end"],
+        "description": "Which lines to return. It is always an object with the same three fields, and kind decides which of the other two matter, so you never choose between two shapes of argument.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["whole_file", "range"],
+            "description": "whole_file reads from line 1 up to the response_format cap and ignores start and end; use it unless a previous read came back truncated. range reads only the lines from start to end, which is how you reach a part of a long file without paying for the rest."
+          },
+          "start": {
+            "type": ["integer", "null"],
+            "description": "The first line to return, counting from 1, when kind is range. Null with kind range means line 1. Ignored when kind is whole_file; pass null there."
+          },
+          "end": {
+            "type": ["integer", "null"],
+            "description": "The last line to return, counting from 1 and included, when kind is range. Null with kind range means the end of the file, subject to the response_format cap. Ignored when kind is whole_file; pass null there."
+          }
+        }
+      }
+    }
+  },
+  "result_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["path", "found", "lines", "first_line", "last_line", "chars_returned", "truncated", "response_format", "text"],
+    "properties": {
+      "path": {"type": "string"},
+      "found": {"type": "boolean"},
+      "lines": {"type": "integer"},
+      "first_line": {"type": "integer"},
+      "last_line": {"type": "integer"},
+      "chars_returned": {"type": "integer"},
+      "truncated": {"type": "boolean"},
+      "response_format": {"type": "string"},
+      "text": {"type": "string"}
+    }
+  },
+  "boundary": {
+    "path": {"non_blank": true, "max_chars": 400},
+    "line_range.start": {"min": 1, "max": 1000000},
+    "line_range.end": {"min": 1, "max": 1000000}
+  },
+  "examples": [
+    {
+      "input": {"path": "src/util/money.ts", "response_format": "concise", "line_range": {"kind": "whole_file", "start": null, "end": null}},
+      "note": "Typical. One file, whole, in the cheap format: the read that follows a search and confirms the file a triage will name."
     },
-    "required": ["path"]
-  }
+    {
+      "input": {"path": "src/db/migrations/001_init.sql", "response_format": "detailed", "line_range": {"kind": "range", "start": 1, "end": 40}},
+      "note": "Hard: only part of a long file. kind range makes start and end count, and they are line numbers from 1 with end included, not an offset and a length. The same object with kind whole_file would read from the top and ignore both, which is why the kind field exists rather than two shapes of argument."
+    }
+  ]
 }

@@ -11,6 +11,7 @@ You may change a step that failed, to retry it: for a search, change its action 
 say what to look for instead, and keep "$fill" for its query, which the executor
 fills in. You may change or add any step not yet run. Every step still needs one
 tool from the plan's list, an expected_result, and depends_on naming only earlier
-steps, and the last step is post_comment.
+steps. The last step is the issues_comment step, and the step right before it is the
+pulls_open_draft step: that order is fixed and a plan that breaks it is rejected.
 
 Submit the whole repaired plan with submit_plan, once.

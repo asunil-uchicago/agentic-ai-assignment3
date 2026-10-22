@@ -17,11 +17,17 @@ FILL = "$fill"
 
 
 def step_args(step: dict) -> dict:
-    """A step's arguments, from `args` or from `args_json`."""
+    """A step's arguments, from `args` or from `args_json`.
+
+    Parsed with `strict=False`, because a planner writes a multi-line value as a real
+    newline inside the JSON string rather than as `\n`, which strict JSON refuses. A
+    strict parse discards every argument of the step over one byte of whitespace, so the
+    tolerant parse is the repair: the arguments still face the boundary before the tool
+    runs, and whitespace is not what the boundary is there to catch."""
     if isinstance(step.get("args"), dict):
         return step["args"]
     try:
-        args = json.loads(step.get("args_json") or "{}")
+        args = json.loads(step.get("args_json") or "{}", strict=False)
     except (TypeError, ValueError):
         return {}
     return args if isinstance(args, dict) else {}

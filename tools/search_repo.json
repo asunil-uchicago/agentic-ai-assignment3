@@ -1,14 +1,72 @@
 {
-  "name": "search_repo",
-  "description": "Search the code.",
+  "name": "code_search",
+  "description": "Search Ledgerline's private codebase for a literal string, case-insensitively, line by line. It matches the text inside files, never file names, and it is not a regular-expression or boolean query language: give it one short phrase a developer would have typed, such as an identifier or a quoted error message, not a sentence from the issue. Use it to turn a description of a symptom into candidate paths, then read one of them. Returns a JSON object: query (echoed back exactly as it was run), query_valid, path_glob, response_format, count (how many lines matched in the whole codebase), returned (how many of them are in results), truncated, index_age, and results, a list of {path, line, text}. A search that matched nothing is a success, not an error: it comes back with query_valid true, count 0 and an empty results list, which means the codebase does not contain that string and a different string is worth trying. A malformed search is an error instead, and there are three ways to be malformed: a blank query, a query longer than 4000 characters, and a path_glob that is not a valid glob. Every response is capped: at most max_results hits come back, at most 20 whatever you ask for, and when count is larger than returned, truncated is true, so a cut result always says it was cut. index_age says how old the prebuilt index behind these matches is, in days.",
+  "strict": true,
   "input_schema": {
     "type": "object",
+    "additionalProperties": false,
+    "required": ["query", "path_glob", "max_results", "response_format"],
     "properties": {
-      "query": {"type": "string", "description": "Text to look for"},
-      "max_results": {"type": "integer", "description": "How many results. Default 10."},
-      "filter": {"type": "string", "description": "Optional filter expression"},
-      "deep": {"type": "boolean", "description": "Whether to do a deep search. Default false."}
+      "query": {
+        "type": "string",
+        "description": "The literal text to look for, matched case-insensitively as a substring of each line. One to five words, or one identifier. A longer query matches fewer lines, not more: this is substring matching, so each extra word must appear verbatim on the same line. Must not be blank, and must be at most 4000 characters."
+      },
+      "path_glob": {
+        "type": ["string", "null"],
+        "description": "A glob that limits the search to the paths it matches, relative to the repository root, such as src/ingest/*.ts or src/**/*.tsx. Set it when you already know which part of the codebase is involved: it cuts the response and the time it takes, and it hides matches elsewhere, which is why a search that comes back with count 0 under a glob is worth repeating with null. Null searches every indexed file. It is a path glob and nothing else: * ? [ ] { } over letters, digits, / . _ and -. It is not a query language, so no field:value terms, no AND or OR, no quotes and no spaces."
+      },
+      "max_results": {
+        "type": ["integer", "null"],
+        "description": "How many of the matching lines to return, from 1 to 20. Null means 10, which is enough to see whether one file dominates the matches. Raising it costs tokens on every later turn and never changes count, which always reports every match in the codebase."
+      },
+      "response_format": {
+        "type": ["string", "null"],
+        "enum": ["concise", "detailed", null],
+        "description": "How much of each matching line to return. Null means concise, which is the cheap default and the right choice for a first search: it returns at most 160 characters of each line, enough to recognise the code. detailed returns at most 600 characters of each line and is worth its extra tokens only when a concise hit was cut mid-expression and you must see the rest to choose between two files."
+      }
+    }
+  },
+  "result_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["query", "query_valid", "path_glob", "response_format", "count", "returned", "truncated", "index_age", "results"],
+    "properties": {
+      "query": {"type": "string"},
+      "query_valid": {"type": "boolean"},
+      "path_glob": {"type": ["string", "null"]},
+      "response_format": {"type": "string"},
+      "count": {"type": "integer"},
+      "returned": {"type": "integer"},
+      "truncated": {"type": "boolean"},
+      "index_age": {"type": "string"},
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "line", "text"],
+          "properties": {
+            "path": {"type": "string"},
+            "line": {"type": "integer"},
+            "text": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  "boundary": {
+    "query": {"non_blank": true, "max_chars": 4000},
+    "max_results": {"min": 1, "max": 20},
+    "path_glob": {"max_chars": 200}
+  },
+  "examples": [
+    {
+      "input": {"query": "formatCurrency", "path_glob": null, "max_results": 10, "response_format": "concise"},
+      "note": "Typical. One identifier, no glob, the cheap default format: the first search of a triage, where you do not yet know which part of the codebase is involved."
     },
-    "required": ["query"]
-  }
+    {
+      "input": {"query": "toFixed(", "path_glob": "src/util/*.ts", "max_results": 20, "response_format": "detailed"},
+      "note": "Hard: the query contains a bracket, and the glob narrows the search. Nothing here is escaped or parsed as syntax, because query is literal text and path_glob is a path glob, not a query language. The two are checked separately, so an unbalanced bracket in path_glob is an error while the same bracket in query is just a character to find."
+    }
+  ]
 }

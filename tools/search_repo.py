@@ -1,18 +1,21 @@
-"""search_repo: literal, case-insensitive text search over the private codebase.
+"""code_search: literal, case-insensitive text search over the private codebase.
 
 Its definition is search_repo.json. It reads a prebuilt index,
 fixtures/search_index/index.json, of every text file under fixtures/repo except
-config/, and the index records when it was built. With deep set, it reads the files
-themselves instead. Results come back in path order, one line each, as
-path:line: excerpt, then one line saying when the index was built, how many lines
-matched and how many are shown: the truncation and the index's age.
+config/, and the index records when it was built.
 
-**Malformed**, for Assignment 3 (Part A, task 1), is any of three things:
-  1. a query that is empty or only whitespace;
-  2. a query longer than MAX_QUERY_CHARS;
-  3. a filter that is not a valid glob (glob_problem, below).
-This stub answers a malformed query exactly as it answers one that matched nothing,
-"No matches.": the defect Part A removes. The two must differ in the raw response.
+Assignment 3, Part A. The result is a JSON object, not a line of prose, so that a
+search which matched nothing can be told from one that was malformed in the raw
+response and not only in the description (slide 15):
+
+  matched nothing    a success: query_valid true, count 0, results []
+  malformed          a tool execution error, with a repair fact
+
+Malformed is three things, and each is reported separately. A blank query and a
+query past the cap are caught at the boundary, before run() is reached, because
+they are length rules (Part A, task 6); a path_glob that is not a glob is caught
+here, because what counts as a glob is this tool's own business. `truncated` and
+`index_age` are fields of the result, from what the index reports.
 """
 
 from __future__ import annotations
@@ -25,8 +28,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 EXCLUDED_DIRS = {"config", "node_modules", ".git"}
-HARD_CAP = 20
-MAX_QUERY_CHARS = 200
+HARD_CAP = 20            # at most this many hits, whatever max_results asks for
+DEFAULT_RESULTS = 10     # what null means
+MAX_QUERY_CHARS = 4000   # as the description states; enforced at the boundary
+EXCERPT = {"concise": 160, "detailed": 600}
+DEFAULT_FORMAT = "concise"
 INDEX = "fixtures/search_index/index.json"
 GLOB_CHARS = re.compile(r"^[A-Za-z0-9_.\-/*?\[\]{},]+$")
 
@@ -51,18 +57,6 @@ def glob_problem(pattern: str) -> str | None:
     return None
 
 
-def problem(query, filter=None) -> str | None:
-    """Why this search is malformed, or None when it is well-formed."""
-    text = str(query or "")
-    if not text.strip():
-        return "the query is empty"
-    if len(text) > MAX_QUERY_CHARS:
-        return f"the query is {len(text)} characters long; the cap is {MAX_QUERY_CHARS}"
-    if filter not in (None, ""):
-        return glob_problem(str(filter))
-    return None
-
-
 def _expand(pattern: str) -> list[str]:
     """{a,b} alternatives, which fnmatch does not know."""
     match = re.search(r"\{([^{}]*)\}", pattern)
@@ -83,38 +77,44 @@ def load_index(root: Path) -> dict:
     return json.loads((Path(root) / INDEX).read_text())
 
 
-def _disk(repo_root: Path) -> dict[str, list[str]]:
-    files = {}
-    for path in sorted(Path(repo_root).rglob("*")):
-        rel = path.relative_to(repo_root)
-        if path.is_file() and not (set(rel.parts) & EXCLUDED_DIRS):
-            try:
-                files[rel.as_posix()] = path.read_text().splitlines()
-            except UnicodeDecodeError:
-                continue
-    return files
-
-
 def age(built_at: str, now: float | None = None) -> str:
     built = datetime.strptime(built_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     days = int(((now or time.time()) - built.timestamp()) // 86400)
     return "today" if days < 1 else f"{days} day{'s' if days != 1 else ''} ago"
 
 
-def run(ctx, query, max_results=10, filter=None, deep=False):
-    if problem(query, filter) is not None:
-        return "No matches."
-    repo_root = Path(ctx.repo_root)
-    if deep:
-        files, source = _disk(repo_root), "read from disk"
-    else:
-        index = load_index(repo_root.parent.parent)
-        files, source = index["files"], f"index built {index['built_at']}, {age(index['built_at'])}"
+def run(ctx, query, path_glob=None, max_results=None, response_format=None):
+    from tools import ToolError
+
+    pattern = None if path_glob in (None, "") else str(path_glob)
+    if pattern is not None:
+        why = glob_problem(pattern)
+        if why is not None:
+            raise ToolError(
+                f"path_glob {pattern!r} is not a valid path glob: {why}. A valid glob looks like "
+                "src/ingest/*.ts or src/**/*.tsx, and null searches every indexed file. path_glob filters "
+                "paths and is not a query language: put the text you are looking for in query instead. "
+                "This will not succeed until path_glob is a glob or null.")
+
+    fmt = DEFAULT_FORMAT if response_format in (None, "") else str(response_format)
+    limit = DEFAULT_RESULTS if max_results in (None, "") else int(max_results)
+    limit = max(1, min(limit, HARD_CAP))
     needle = str(query).strip().lower()
-    limit = max(1, min(int(max_results), HARD_CAP))
-    hits = [f"{rel}:{number}: {line.strip()[:160]}"
-            for rel, lines in sorted(files.items()) if _matches(rel, filter)
+
+    index = load_index(Path(ctx.repo_root).parent.parent)
+    files = index["files"]
+    hits = [{"path": rel, "line": number, "text": line.strip()[:EXCERPT[fmt]]}
+            for rel, lines in sorted(files.items()) if _matches(rel, pattern)
             for number, line in enumerate(lines, 1) if needle in line.lower()]
-    if not hits:
-        return "No matches."
-    return "\n".join(hits[:limit]) + f"\n[{source}; {len(hits)} matches, {min(limit, len(hits))} shown]"
+    shown = hits[:limit]
+    return json.dumps({
+        "query": str(query),
+        "query_valid": True,
+        "path_glob": pattern,
+        "response_format": fmt,
+        "count": len(hits),
+        "returned": len(shown),
+        "truncated": len(hits) > len(shown),
+        "index_age": age(index["built_at"]),
+        "results": shown,
+    }, ensure_ascii=False)

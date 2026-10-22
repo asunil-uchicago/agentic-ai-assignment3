@@ -36,6 +36,8 @@ models:
   # 100,000 tokens, which every request in these assignments is (over it: 0.50 and 2.50).
   claude-haiku-5-5:  {input: 0.10, output: 0.50,  cache_write_5m: 0.125, cache_write_1h: 0.20, cache_read: 0.01, source: "https://platform.claude.com/docs/en/about-claude/pricing", read: 2026-10-11}
   claude-haiku-4-5:  {input: 1.00, output: 5.00,  cache_write_5m: 1.25, cache_write_1h: 2.00,  cache_read: 0.10}
+  gpt-4o-mini: {input: 0.15, output: 0.60, cache_write_5m: 0.15, cache_write_1h: 0.15, cache_read: 0.075,
+                source: "https://developers.openai.com/api/docs/pricing", read: 2026-10-08}
   never-stops:       {input: 0.00, output: 0.00,  cache_write_5m: 0.00, cache_write_1h: 0.00,  cache_read: 0.00}   # the scripted model; free
 
   # Google Gemini, paid tier (use it on the free tier too: the assignments measure what a design would cost).

@@ -39,11 +39,26 @@ def _tool_list(tool_schemas: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _submitted(response) -> list[dict]:
+def _tool_name(name, known: set) -> str:
+    """A step's tool as the registry knows it. Some vendors hand back a tool's name
+    namespaced by their own function namespace ("functions.code_search"), so the name
+    is mapped to the one it ends with when that is a tool the registry has, and left
+    alone otherwise: an unknown tool is still check 1's to reject."""
+    if not isinstance(name, str) or name in known:
+        return name
+    tail = name.rsplit(".", 1)[-1]
+    return tail if tail in known else name
+
+
+def _submitted(response, known=()) -> list[dict]:
     for call in response.tool_calls:
         if call.name == SUBMIT_PLAN["name"]:
             steps = call.input.get("steps")
-            return steps if isinstance(steps, list) else []
+            steps = steps if isinstance(steps, list) else []
+            for step in steps:
+                if isinstance(step, dict):
+                    step["tool"] = _tool_name(step.get("tool"), set(known))
+            return steps
     return []
 
 
@@ -60,9 +75,10 @@ def make_plan(client, issue_number: int, tool_schemas: list[dict], trace=None, *
                              tools=[SUBMIT_PLAN])
     if trace is not None:
         trace.model_call(0, response, purpose="plan")
+    names = [t["name"] for t in tool_schemas]
     return {"meta": {"model": response.model, "prompt": PLANNER_PROMPT,
-                     "tools": [t["name"] for t in tool_schemas]},
-            "steps": _submitted(response)}
+                     "tools": names},
+            "steps": _submitted(response, names)}
 
 
 def revise_plan(client, plan: dict, step_results: list[dict], trace=None) -> dict:
@@ -76,7 +92,7 @@ def revise_plan(client, plan: dict, step_results: list[dict], trace=None) -> dic
                              tools=[SUBMIT_PLAN])
     if trace is not None:
         trace.model_call(0, response, purpose="revise")
-    proposed = _submitted(response)
+    proposed = _submitted(response, (plan.get("meta") or {}).get("tools") or [])
 
     # A step that is done comes back as it was, whatever the model wrote; a failed one may change.
     done = [str(r.get("id")) for r in step_results if r.get("status") == "done"]

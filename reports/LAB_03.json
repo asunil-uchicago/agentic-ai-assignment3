@@ -1,33 +1,112 @@
 {
   "lab": "03",
   "strict": {
-    "tools": null,
-    "optional_params": null,
-    "union_types": null,
-    "compiles": null
+    "tools": 5,
+    "optional_params": 0,
+    "union_types": 6,
+    "compiles": true
   },
   "failures": {
-    "read_issue": {"transient": [], "permanent": [], "ambiguous": []},
-    "search": {"transient": [], "permanent": [], "ambiguous": []},
-    "read_file": {"transient": [], "permanent": [], "ambiguous": []},
-    "comment": {"transient": [], "permanent": [], "ambiguous": []},
-    "open_pr": {"transient": [], "permanent": [], "ambiguous": []}
+    "read_issue": {
+      "transient": [
+        "the issue's Markdown file could not be read (OSError); retried in the registry, below the model, up to twice"
+      ],
+      "permanent": [
+        "no issue with that number in the tracker; the error lists the numbers it holds",
+        "number outside the boundary's range (1000 to 999999)",
+        "number missing, a string, or any non-integer: refused at the boundary before the tool ran",
+        "an unknown argument: refused at the boundary"
+      ],
+      "ambiguous": []
+    },
+    "search": {
+      "transient": [
+        "the prebuilt index fixtures/search_index/index.json could not be read (OSError); retried in the registry, below the model"
+      ],
+      "permanent": [
+        "a blank or whitespace-only query: refused at the boundary",
+        "a query longer than 4000 characters: refused at the boundary, which names the cap",
+        "a path_glob that is not a valid path glob: a tool execution error naming what a glob is",
+        "max_results outside 1 to 20: refused at the boundary",
+        "a missing, wrong-typed or unknown argument: refused at the boundary",
+        "a response_format outside concise and detailed: refused at the boundary, which lists both"
+      ],
+      "ambiguous": []
+    },
+    "read_file": {
+      "transient": [
+        "the file could not be read (OSError); retried in the registry, below the model"
+      ],
+      "permanent": [
+        "no file at that path, case included; the error names every near match",
+        "a file under config/, which is not readable",
+        "a file that is not text",
+        "a line_range whose start is past its end, or outside 1 to 1000000",
+        "a blank path, or a path longer than 400 characters: refused at the boundary",
+        "a missing, wrong-typed or unknown argument: refused at the boundary"
+      ],
+      "ambiguous": []
+    },
+    "comment": {
+      "transient": [
+        "none the caller can see: a timeout before the request reached the tracker would be transient, but the tracker reports it in the same words as one after the commit, so it cannot be told apart and is counted as ambiguous"
+      ],
+      "permanent": [
+        "a blank or whitespace-only body",
+        "a body longer than 8000 characters: refused at the boundary, which names the cap",
+        "no issue with that number in the tracker",
+        "a missing, wrong-typed or unknown argument: refused at the boundary",
+        "a call a pre-call hook denied, or one whose hook raised: denied before the tool ran"
+      ],
+      "ambiguous": [
+        "TrackerTimeout: the tracker did not answer in time, and the comment may or may not have been committed. Resolved by reading the key back; if the read-back also fails (READBACK_FAIL), the run ends escalated"
+      ]
+    },
+    "open_pr": {
+      "transient": [
+        "none the caller can see, for the same reason as the comment: the tracker's two kinds of timeout are reported identically"
+      ],
+      "permanent": [
+        "a blank branch or title",
+        "a title longer than 200 characters, or a body longer than 8000: refused at the boundary",
+        "no issue with that number in the tracker",
+        "a missing, wrong-typed or unknown argument: refused at the boundary",
+        "a call a pre-call hook denied, or one whose hook raised: denied before the tool ran"
+      ],
+      "ambiguous": [
+        "TrackerTimeout: the pull request may or may not have been opened. Resolved by reading the key, and then the branch, back; if the read-back also fails, the run ends escalated with no comment posted"
+      ]
+    }
   },
-  "protocol_error_policy": null,
+  "protocol_error_policy": "generic_result",
   "surface": {
-    "tokens_before": null,
-    "tokens_after": null,
-    "list_tokens_before": null,
-    "list_tokens_after": null,
-    "calls_per_run": null,
-    "cost_per_run_before": null,
-    "cost_per_run_after": null,
-    "cost_per_run_all_five": null
+    "tokens_before": 191,
+    "tokens_after": 3604,
+    "list_tokens_before": 113,
+    "list_tokens_after": 2414,
+    "calls_per_run": 5.67,
+    "cost_per_run_before": 6.8e-05,
+    "cost_per_run_after": 0.001306,
+    "cost_per_run_all_five": 0.003063
   },
   "writes": {
-    "harness": {"runs": null, "comments_per_run_max": null, "duplicate_comment_runs": null, "prs_correct_runs": null,
-                "committed_timeouts": null, "escalated": null, "triage_passes": null},
-    "control": {"runs": null, "comments_per_run_max": null, "duplicate_comment_runs": null, "prs_correct_runs": null,
-                "committed_timeouts": null, "escalated": null, "triage_passes": null}
+    "harness": {
+      "runs": 12,
+      "comments_per_run_max": 1,
+      "duplicate_comment_runs": 0,
+      "prs_correct_runs": 12,
+      "committed_timeouts": 7,
+      "escalated": 0,
+      "triage_passes": 4
+    },
+    "control": {
+      "runs": 12,
+      "comments_per_run_max": 3,
+      "duplicate_comment_runs": 7,
+      "prs_correct_runs": 12,
+      "committed_timeouts": 18,
+      "escalated": 5,
+      "triage_passes": 2
+    }
   }
 }

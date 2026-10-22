@@ -1,14 +1,59 @@
 {
-  "name": "open_pr",
-  "description": "Open a pull request.",
+  "name": "pulls_open_draft",
+  "description": "Open one draft pull request on Ledgerline's remote, proposing the change the triage calls for. It runs after the file is settled and before the comment, because a pull request can be closed again and a comment cannot: a triage that fails here has shown a reader nothing. Open it only for a triage that names a file; a triage whose file is none has nothing to propose and must open no pull request at all. The branch is always repomind/issue-<number> for the issue being triaged, and the remote needs no commits: the body describes the change in prose rather than carrying a diff. Returns a JSON object: pr_id, issue, branch, state, draft, already_open, confirmed_by and body_chars. A success always carries a pr_id and state open; there is no empty or pending result, and a blank branch, title or body is an error rather than a pull request with nothing in it. The body is capped at 8000 characters and the title at 200, and a longer one is an error that says the cap rather than a silently truncated pull request. Opening is idempotent: the harness attaches a key the caller never sets or sees, and an open pull request already on that branch in this run comes back with already_open true instead of a second one.",
+  "strict": true,
   "input_schema": {
     "type": "object",
+    "additionalProperties": false,
+    "required": ["number", "branch", "title", "body"],
     "properties": {
-      "number": {"type": "integer", "description": "Issue number"},
-      "branch": {"type": "string", "description": "Branch"},
-      "title": {"type": "string", "description": "Title"},
-      "body": {"type": "string", "description": "Body"}
+      "number": {
+        "type": "integer",
+        "description": "The number of the issue this pull request answers, as a bare integer such as 4192. It must be the issue being triaged, and it must be the same number the comment will carry."
+      },
+      "branch": {
+        "type": "string",
+        "description": "The branch the pull request comes from, which is always repomind/issue-<number> with the same number as above, such as repomind/issue-4192. It is also the key the remote checks before opening a second one, so any other spelling turns a retry into a duplicate pull request."
+      },
+      "title": {
+        "type": "string",
+        "description": "One line naming the file and the fix, such as 'Await the pool in src/api/health.ts before reporting ready'. It is read in a list beside other pull requests, so it says what changes rather than restating the issue. At most 200 characters."
+      },
+      "body": {
+        "type": "string",
+        "description": "The proposed change, in prose, for a reviewer who has not read the issue: the file the triage names, what in it causes the reported behaviour, and what the change would be. No diff and no patch, because the remote holds no commits. At most 8000 characters."
+      }
+    }
+  },
+  "result_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["pr_id", "issue", "branch", "state", "draft", "already_open", "confirmed_by", "body_chars"],
+    "properties": {
+      "pr_id": {"type": "string"},
+      "issue": {"type": "integer"},
+      "branch": {"type": "string"},
+      "state": {"type": "string"},
+      "draft": {"type": "boolean"},
+      "already_open": {"type": "boolean"},
+      "confirmed_by": {"type": "string"},
+      "body_chars": {"type": "integer"}
+    }
+  },
+  "boundary": {
+    "number": {"min": 1000, "max": 999999},
+    "branch": {"non_blank": true, "max_chars": 200},
+    "title": {"non_blank": true, "max_chars": 200},
+    "body": {"non_blank": true, "max_chars": 8000}
+  },
+  "examples": [
+    {
+      "input": {"number": 4192, "branch": "repomind/issue-4192", "title": "Await the pool in src/api/health.ts before reporting ready", "body": "Issue 4192 reports that the first request after a deploy fails. src/api/health.ts answers the readiness probe as soon as the process starts, before the pool in src/db/client.ts has opened. The probe should await the pool and report not-ready until it is open."},
+      "note": "Typical. The branch carries the issue's own number, the title names the fix, and the body describes the change in prose for a reviewer."
     },
-    "required": ["number", "branch", "title", "body"]
-  }
+    {
+      "input": {"number": 4192, "branch": "repomind/issue-4192", "title": "Await the pool in src/api/health.ts before reporting ready", "body": "Issue 4192 reports that the first request after a deploy fails. src/api/health.ts answers the readiness probe as soon as the process starts, before the pool in src/db/client.ts has opened. The probe should await the pool and report not-ready until it is open."},
+      "note": "Hard: the same call again, as happens when the first attempt timed out and the caller cannot tell whether it landed. It opens nothing new. The remote keys a pull request on this run and this branch, so the reply is the first pull request with already_open true, which is why the branch must be spelled repomind/issue-<number> every time and why the title and body must be repeated unchanged rather than written again."
+    }
+  ]
 }

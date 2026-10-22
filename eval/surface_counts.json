@@ -1,0 +1,27 @@
+{
+  "model": "gpt-4o-mini",
+  "baseline_prompt_tokens": 29,
+  "before": {
+    "five": 191,
+    "each": {
+      "read_issue": 37,
+      "search_repo": 71,
+      "read_file": 34,
+      "post_comment": 44,
+      "open_pr": 53
+    },
+    "list": 113
+  },
+  "after": {
+    "five": 3604,
+    "each": {
+      "issues_read": 396,
+      "code_search": 907,
+      "code_read_file": 847,
+      "issues_comment": 638,
+      "pulls_open_draft": 864
+    },
+    "list": 2414
+  },
+  "cost_usd_of_measuring": 0.001614
+}

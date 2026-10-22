@@ -1,12 +1,47 @@
 {
-  "name": "post_comment",
-  "description": "Post a comment on an issue.",
+  "name": "issues_comment",
+  "description": "Post the triage comment on an issue in Ledgerline's issue tracker. This is the only step of a triage that anyone outside the system sees, and it cannot be undone: a comment, once read, cannot be taken back, so it runs last, after the pull request, and only once per triage. Call it when the label and the file are settled, never to think out loud. The body's first two lines must be exactly 'label: <bug | feature | question | docs>' and 'file: <path relative to the repository root, or none>'; anything after them is free text for a human reader. Returns a JSON object: comment_id, issue, state, duplicate, confirmed_by and body_chars. A body that is empty or only whitespace is an error, never a posted comment, and nothing about a successful post is empty: a success always carries a comment_id. The body is capped at 8000 characters, and a longer one is an error that says so rather than a comment the tracker silently truncated. Posting is idempotent: the harness attaches a key the caller never sets or sees, so a retry of the same comment returns the first post with duplicate true instead of posting twice.",
+  "strict": true,
   "input_schema": {
     "type": "object",
+    "additionalProperties": false,
+    "required": ["number", "body"],
     "properties": {
-      "number": {"type": "integer", "description": "Issue number"},
-      "body": {"type": "string", "description": "Comment text"}
+      "number": {
+        "type": "integer",
+        "description": "The number of the issue to comment on, as a bare integer such as 4192. It must be the issue being triaged: a number for another issue posts public text on a stranger's report, and there is no way to delete it afterwards."
+      },
+      "body": {
+        "type": "string",
+        "description": "The comment's text. Its first line must be 'label: ' followed by one of bug, feature, question or docs, and its second must be 'file: ' followed by one path relative to the repository root, or the word none. A question is the only label that takes none, and every other label takes a path that exists. Keep what follows to a short paragraph: it is read by the person who filed the issue, so it explains the verdict rather than restating the issue. At most 8000 characters."
+      }
+    }
+  },
+  "result_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["comment_id", "issue", "state", "duplicate", "confirmed_by", "body_chars"],
+    "properties": {
+      "comment_id": {"type": "string"},
+      "issue": {"type": "integer"},
+      "state": {"type": "string"},
+      "duplicate": {"type": "boolean"},
+      "confirmed_by": {"type": "string"},
+      "body_chars": {"type": "integer"}
+    }
+  },
+  "boundary": {
+    "number": {"min": 1000, "max": 999999},
+    "body": {"non_blank": true, "max_chars": 8000}
+  },
+  "examples": [
+    {
+      "input": {"number": 4192, "body": "label: bug\nfile: src/api/health.ts\n\nThe readiness probe reports healthy before the database pool has opened, so the first request after a deploy fails."},
+      "note": "Typical. The two required lines, then one short paragraph for the person who filed the issue."
     },
-    "required": ["number", "body"]
-  }
+    {
+      "input": {"number": 4192, "body": "label: question\nfile: none\n\nScheduled exports run in the account's own timezone, which is set per account and not per report. Nothing needs to change."},
+      "note": "Hard: a triage that names no file. Only the label question takes 'file: none', and it must still be the literal word none, not an empty value, an omitted line or a guessed path. Writing 'file: none' under any other label contradicts the label, and writing a path under question contradicts it the other way."
+    }
+  ]
 }
